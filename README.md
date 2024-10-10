@@ -1,84 +1,87 @@
-# RTLS 시스템 개요 (주 앵커, 보조 앵커, 태그 간의 통신)
+# UWB 기반 양방향 거리 측정 시스템
 
-이 프로젝트는 **ISO/IEC 24730-62:2013** 표준에 기반한 **실시간 위치 추적 시스템(RTLS)**으로, **두 웨이 레이징(TWR, Two-Way Ranging)** 기법을 사용하여 주 앵커, 보조 앵커, 태그 간의 통신을 통해 실내 위치를 계산합니다. **DW1000 UWB 모듈**을 활용하여 각 장치들이 서로 통신하며, 태그의 정확한 위치를 측정하는 데 사용됩니다.
+이 프로젝트는 **Decawave DW1000Ng** UWB 모듈을 사용하여 **양방향 거리 측정(TWR)**을 구현한 예제입니다. 이 시스템은 **Tag**와 **Anchors**(A, B, C)로 구성되며, 각각의 장치가 특정 역할을 수행하여 태그와 앵커 사이의 거리를 측정합니다.
 
-## 시스템 구성 요소
+## 시스템 구성
 
-1. **주 앵커 (Anchor A)**: 시스템의 중앙 허브 역할을 하며, 보조 앵커 및 태그와 통신하여 태그의 위치를 계산하는 주체입니다.
-2. **보조 앵커 (Anchor B, Anchor C)**: 주 앵커와 통신하며, 태그와의 거리를 측정하여 주 앵커에 보고합니다.
-3. **태그 (Tag)**: 위치를 측정할 대상이며, 앵커들과 통신하여 거리를 측정합니다.
+1. **Tag**: 거리 측정을 시작하는 장치입니다. POLL 메시지를 전송하고, 앵커로부터 POLL_ACK를 수신한 후 RANGE 메시지를 보내 거리 측정을 수행합니다.
+2. **Anchor A, B, C**: 태그의 POLL 메시지를 수신하여 POLL_ACK 메시지로 응답하고, RANGE 메시지를 통해 거리 정보를 처리합니다. 각 앵커는 **타임 슬롯 방식**을 사용하여 특정 시간에만 활성화됩니다.
 
-## 통신 및 위치 측위 로직
+## 주요 기능
 
-### 전체 시스템 흐름
+- **양방향 거리 측정**: 태그와 앵커 사이의 왕복 시간을 이용해 거리를 계산합니다.
+- **타임 슬롯 방식**: 각 앵커가 고유한 타임 슬롯에서 동작하여 간섭을 피합니다.
+- **MQTT 통신**: 앵커에서 계산된 거리를 MQTT 브로커로 전송할 수 있습니다.
+
+## Tag와 Anchor 간의 상호작용
+
+아래 Sequence Diagram은 Tag와 Anchors 간의 메시지 교환을 시각적으로 보여줍니다.
 
 ```mermaid
 sequenceDiagram
     participant Tag
-    participant AnchorA as 주 앵커 (Anchor A)
-    participant AnchorB as 보조 앵커 (Anchor B)
-    participant AnchorC as 보조 앵커 (Anchor C)
+    participant AnchorA
+    participant AnchorB
+    participant AnchorC
 
-    Tag->>AnchorA: 블링크 메시지 전송 (Blink Frame)
-    AnchorA->>AnchorB: 거리 측정 요청 (Ranging Request)
-    AnchorA->>AnchorC: 거리 측정 요청 (Ranging Request)
-    
-    AnchorB->>Tag: 거리 측정 프레임 송신 (TWR Frame)
-    AnchorC->>Tag: 거리 측정 프레임 송신 (TWR Frame)
-    
-    Tag->>AnchorB: 응답 메시지 전송 (Ranging Response)
-    Tag->>AnchorC: 응답 메시지 전송 (Ranging Response)
-    
-    AnchorB->>AnchorA: 거리 정보 전송 (Range Report)
-    AnchorC->>AnchorA: 거리 정보 전송 (Range Report)
-    
-    AnchorA->>AnchorA: 다중 거리 정보 기반으로 태그의 위치 계산 (Trilateration)
-    AnchorA->>Tag: 태그의 위치 정보 송신 (Position Report)
+    Tag->>AnchorA: POLL 전송
+    AnchorA-->>Tag: POLL_ACK 응답
+    Tag->>AnchorA: RANGE 전송
+    AnchorA-->>Tag: RANGE_REPORT (거리 계산)
+
+    Tag->>AnchorB: POLL 전송
+    AnchorB-->>Tag: POLL_ACK 응답
+    Tag->>AnchorB: RANGE 전송
+    AnchorB-->>Tag: RANGE_REPORT (거리 계산)
+
+    Tag->>AnchorC: POLL 전송
+    AnchorC-->>Tag: POLL_ACK 응답
+    Tag->>AnchorC: RANGE 전송
+    AnchorC-->>Tag: RANGE_REPORT (거리 계산)
 ```
 
-### 통신 및 위치 측정 설명
+### Sequence Diagram 설명
 
-1. **태그 (Tag)**는 일정한 주기로 **블링크 프레임**을 전송하여 자신이 존재하고 있음을 시스템에 알립니다. 이 프레임은 주 앵커(Anchor A)에 의해 수신됩니다.
-2. **주 앵커 (Anchor A)**는 블링크 메시지를 수신한 후, **보조 앵커 (Anchor B, Anchor C)**에 각각 **거리 측정 요청(Ranging Request)**을 보냅니다.
-3. **보조 앵커 (Anchor B, Anchor C)**는 태그와 직접 통신하여 **두 웨이 레이징(TWR)** 과정을 시작합니다. 이를 통해 태그와의 거리를 측정합니다.
-4. 태그는 보조 앵커로부터 수신된 **거리 측정 프레임(TWR Frame)**에 대한 응답 메시지를 각각 보냅니다.
-5. **보조 앵커 (Anchor B, Anchor C)**는 측정된 거리 정보를 **주 앵커 (Anchor A)**에 **거리 보고(Range Report)** 형태로 전송합니다.
-6. **주 앵커 (Anchor A)**는 보조 앵커들로부터 받은 거리 데이터를 바탕으로 **트릴레테이션(Trilateration)** 기법을 사용하여 태그의 위치를 계산합니다.
-7. 마지막으로, **주 앵커**는 계산된 위치 정보를 **태그**에 송신하여 태그의 정확한 좌표를 보고합니다.
+1. **Tag와 Anchor 간의 상호작용**: 
+   - Tag는 **POLL** 메시지를 앵커에게 전송하여 거리 측정을 시작합니다.
+   - 앵커는 **POLL_ACK** 메시지로 응답하고, 이후 Tag는 **RANGE** 메시지를 전송합니다.
+   - 앵커는 **RANGE_REPORT** 메시지를 통해 계산된 거리를 Tag에게 전달합니다.
 
-## Trilateration을 통한 위치 계산
+2. **타임 슬롯 방식**:
+   - AnchorA는 첫 번째 타임 슬롯(0~200ms) 동안 동작하며, 이 시간에 Tag와 통신합니다.
+   - AnchorB는 두 번째 타임 슬롯(200~400ms) 동안 동작하며, Tag와 통신합니다.
+   - AnchorC는 세 번째 타임 슬롯(400~600ms) 동안 동작하며, Tag와 통신합니다.
 
-**트릴레테이션(Trilateration)**은 태그와 최소 3개의 앵커 사이의 거리를 바탕으로, 태그의 좌표를 계산하는 방식입니다. 각 앵커는 고정된 위치에 있으며, 태그와의 거리를 측정하여 이를 기반으로 2D 평면 상의 위치를 계산할 수 있습니다.
+## 타임 슬롯 방식
 
-### 트릴레테이션 다이어그램
+각 앵커는 일정 시간 간격으로 돌아가면서 동작합니다. 600ms 주기로 3개의 앵커가 순차적으로 활성화됩니다.
 
-```mermaid
-graph TD
-    A1[Anchor A < 0,0 >] --- Tag
-    A2[Anchor B < x1,y1 >] --- Tag
-    A3[Anchor C < x2,y2 >] --- Tag
-    subgraph Distance Calculation
-        A1 --> D1["Distance A = sqrt((x - 0)^2 + (y - 0)^2)"]
-        A2 --> D2["Distance B = sqrt((x - x1)^2 + (y - y1)^2)"]
-        A3 --> D3["Distance C = sqrt((x - x2)^2 + (y - y2)^2)"]
-    end
-    Tag[(Tag 위치)]
-```
+- **Anchor A**: 0~200ms
+- **Anchor B**: 200~400ms
+- **Anchor C**: 400~600ms
 
-각 앵커로부터 측정된 거리 정보를 기반으로 태그의 위치를 계산하는 수식은 다음과 같습니다:
+이 방식은 UWB 시스템 간의 충돌을 방지하고, 각 앵커가 독립적으로 동작할 수 있도록 합니다.
 
-- **Anchor A**와의 거리 \(D_A\)는 \(D_A = \sqrt{(x - 0)^2 + (y - 0)^2}\)
-- **Anchor B**와의 거리 \(D_B\)는 \(D_B = \sqrt{(x - x1)^2 + (y - y1)^2}\)
-- **Anchor C**와의 거리 \(D_C\)는 \(D_C = \sqrt{(x - x2)^2 + (y - y2)^2}\)
+## Tag의 역할
 
-이 거리 계산식을 통해 각 앵커와 태그 간의 거리를 구하고, 이를 바탕으로 태그의 정확한 좌표 \(x, y\)를 추정할 수 있습니다.
+1. **POLL 메시지 전송**: 거리 측정을 시작하기 위해 앵커에게 POLL 메시지를 전송합니다.
+2. **POLL_ACK 수신**: 앵커로부터 응답(POLL_ACK)을 받습니다.
+3. **RANGE 메시지 전송**: 거리 계산을 위해 RANGE 메시지를 앵커에게 전송합니다.
+4. **RANGE_REPORT 수신**: 앵커로부터 계산된 거리 값을 수신합니다.
 
-## 시스템 기능
+## Anchors의 역할 (A, B, C)
 
-- **두 웨이 레이징(TWR)**: 태그와 각 앵커 간의 거리를 정밀하게 측정하기 위한 두 방향 통신 방식입니다.
-- **트릴레테이션(Trilateration)**: 앵커들과의 거리 데이터를 기반으로 태그의 위치를 추정하는 알고리즘입니다.
-- **실시간 위치 추적**: 주 앵커는 보조 앵커들로부터 받은 데이터를 바탕으로 태그의 위치를 실시간으로 추적합니다.
+1. **POLL 메시지 수신**: Tag로부터 POLL 메시지를 수신합니다.
+2. **POLL_ACK 응답**: Tag에게 응답 메시지(POLL_ACK)를 전송합니다.
+3. **RANGE 메시지 수신**: Tag로부터 RANGE 메시지를 수신하여 거리를 계산합니다.
+4. **RANGE_REPORT 전송**: 계산된 거리 정보를 Tag에게 전송합니다.
 
-## 결론
+## 설정 방법
 
-이 시스템은 **UWB 기술**을 활용한 **RTLS(실시간 위치 추적 시스템)**으로, 태그와 주 앵커 및 보조 앵커 간의 통신을 통해 태그의 위치를 계산하는 구조를 가지고 있습니다. **두 웨이 레이징(TWR)** 기법과 **트릴레테이션(Trilateration)** 알고리즘을 결합하여, 정확한 실내 위치 추적을 수행할 수 있습니다.
+1. **WiFi 및 MQTT 설정**: 각 앵커와 태그의 `moduleConfig.h` 파일에서 WiFi SSID, 비밀번호, MQTT 브로커 정보를 설정합니다.
+2. **코드 업로드**: 각 장치(ESP32 또는 지원되는 장치)에 코드를 업로드합니다.
+3. **장치 연결**: 장치가 WiFi에 연결되고, MQTT 브로커와 연결된 상태에서 거리 측정을 수행합니다.
+
+## 라이선스
+
+이 프로젝트는 **MIT License**에 따라 라이선스가 부여됩니다. 소스 코드는 자유롭게 수정 및 배포할 수 있습니다.
